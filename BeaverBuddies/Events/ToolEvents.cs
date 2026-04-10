@@ -155,16 +155,46 @@ namespace BeaverBuddies.Events
     class BuildingsDeconstructedEvent : ReplayEvent
     {
         public List<string> entityIDs = new List<string>();
+        public List<Vector3Int> coordinates = new List<Vector3Int>();
 
         public override void Replay(IReplayContext context)
         {
             var entityService = context.GetSingleton<EntityService>();
-            foreach (string entityID in entityIDs)
+            var blockService = context.GetSingleton<IBlockService>();
+            int skipped = 0;
+            int recovered = 0;
+
+            for (int i = 0; i < entityIDs.Count; i++)
             {
-                var entity = GetEntityComponent(context, entityID);
-                if (entity == null) continue;
-                entityService.Delete(entity);
+                var entity = GetEntityComponent(context, entityIDs[i]);
+
+                if (entity == null && i < coordinates.Count)
+                {
+                    var objectsAt = blockService.GetObjectsAt(coordinates[i]);
+                    foreach (var obj in objectsAt)
+                    {
+                        if (obj == null) continue;
+                        var ec = obj.GetComponent<EntityComponent>();
+                        if (ec != null) { entity = ec; recovered++; break; }
+                    }
+                }
+
+                if (entity == null)
+                {
+                    Plugin.LogWarning($"[ReplayReject] Deconstruct: entity not found: {entityIDs[i]}" +
+                        (i < coordinates.Count ? $" (no object at {coordinates[i]})" : ""));
+                    skipped++;
+                    continue;
+                }
+
+                try { entityService.Delete(entity); }
+                catch (Exception e) { Plugin.LogWarning($"[ReplayReject] Delete failed: {e.Message}"); }
             }
+
+            if (recovered > 0)
+                Plugin.Log($"[ReplayRecover] Deconstruct: recovered {recovered} entities via coordinates");
+            if (skipped > 0)
+                Plugin.LogWarning($"[ReplayReject] Deconstruct skipped {skipped}/{entityIDs.Count} entities");
         }
 
         public override string ToActionString()
@@ -182,15 +212,19 @@ namespace BeaverBuddies.Events
             {
                 // Filter out null/destroyed components (e.g. paths on platforms
                 // that get destroyed when the platform is queued for deletion)
-                List<string> entityIDs = __instance._temporaryBlockObjects
+                var validObjects = __instance._temporaryBlockObjects
                         .Where(obj => obj != null && obj.GetComponent<EntityComponent>() != null)
-                        .Select(ReplayEvent.GetEntityID)
-                        .Where(id => id != null)
                         .ToList();
 
                 return new BuildingsDeconstructedEvent()
                 {
-                    entityIDs = entityIDs,
+                    entityIDs = validObjects
+                        .Select(ReplayEvent.GetEntityID)
+                        .Where(id => id != null)
+                        .ToList(),
+                    coordinates = validObjects
+                        .Select(obj => obj.GetComponent<BlockObject>().Coordinates)
+                        .ToList(),
                 };
             });
 
