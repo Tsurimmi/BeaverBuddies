@@ -260,12 +260,23 @@ namespace BeaverBuddies.Events
         public override void Replay(IReplayContext context)
         {
             var entityService = context.GetSingleton<EntityService>();
+            var entityRegistry = context.GetSingleton<EntityRegistry>();
+            int missing = 0;
             var blockObjects = blocks.Select(guid =>
             {
-                return context.GetSingleton<EntityRegistry>()
-                .GetEntity(guid)
-                .GetComponent<BlockObject>();
-            }).ToList();
+                var entity = entityRegistry.GetEntity(guid);
+                if (entity == null)
+                {
+                    missing++;
+                    return null;
+                }
+                return entity.GetComponent<BlockObject>();
+            }).Where(obj => obj != null).ToList();
+            if (missing > 0)
+            {
+                Plugin.LogWarning($"[ReplayReject] ClearResourcesMarked: {missing}/{blocks.Count} entities not found (action still applied to remaining {blockObjects.Count})");
+            }
+            if (blockObjects.Count == 0) return;
             if (markForDemolition)
             {
                 context.GetSingleton<DemolishableSelectionTool>().ActionCallback(blockObjects, start, end, false, false);
