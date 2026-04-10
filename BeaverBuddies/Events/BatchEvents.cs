@@ -79,7 +79,12 @@ namespace BeaverBuddies.Events
             int amount = Math.Min(this.amount, distributor.Current);
             if (amount > 0)
             {
-                distributor.MigrateToAndCheckAutomaticMigration(toDistrictCenter, amount);
+                // Only run the manual migration the user requested; skip the
+                // automatic migration check because its outcome depends on the
+                // local distributor state which can diverge between host and
+                // client (different min/max thresholds hit), causing extra
+                // beavers/bots to migrate silently on the receiver side.
+                distributor.MigrateTo(toDistrictCenter, amount);
             }
         }
 
