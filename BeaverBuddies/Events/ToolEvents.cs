@@ -44,18 +44,25 @@ namespace BeaverBuddies.Events
             var placer = context.GetSingleton<BlockObjectPlacerService>().GetMatchingPlacer(blockObjectSpec);
             Placement placement = new Placement(coordinates, orientation,
                 isFlipped ? FlipMode.Flipped : FlipMode.Unflipped);
-            if (!IsPlacementValid(context, placement, buildingSpec))
-            {
-                Plugin.LogWarning($"Invalid placement for {prefabName} at {coordinates}");
-                return;
-            }
 
-            placer.Place(blockObjectSpec, placement, (targetEntity) => {
-                // This callback is called when the object is created (which right now
-                // is just immediately after placement). If we should duplicate settings
-                // to it, the event will have a duplicationSourceID.
-                DuplicateSettingsIfNeeded(context, targetEntity);
-            });
+            // Clean conflicting obstacles at each occupied block of the new placement.
+            // Handles state divergence where the receiver has stale objects (e.g. a
+            // TerrainBlock that wasn't dynamited, a building that wasn't deleted)
+            // blocking the placement. Only removes objects that actually conflict on
+            // the same occupation bits, so coexisting objects (Path over Platform)
+            // are preserved.
+            CleanConflictingObstacles(context, blockObjectSpec, placement);
+
+            try
+            {
+                placer.Place(blockObjectSpec, placement, (targetEntity) => {
+                    DuplicateSettingsIfNeeded(context, targetEntity);
+                });
+            }
+            catch (Exception e)
+            {
+                Plugin.LogWarning($"[ReplayReject] Place failed for {prefabName} at {coordinates}: {e.Message}");
+            }
         }
 
         private void DuplicateSettingsIfNeeded(IReplayContext context, BaseComponent targetEntity)
@@ -69,26 +76,36 @@ namespace BeaverBuddies.Events
             duplicator.Duplicate(sourceEntity, targetEntity);
         }
 
-        // Note: This may not catch every possible invalid placement (e.g. if terrain height changes or something)
-        // but I think it should catch the vast majority of cases due to double placement.
-        private static bool IsPlacementValid(IReplayContext context, Placement placement, BuildingSpec spec)
+        private void CleanConflictingObstacles(IReplayContext context, BlockObjectSpec spec, Placement placement)
         {
-            var templateInstantiator = context.GetSingleton<TemplateInstantiator>();
-            var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
-            // It's a bit wasteful to instantiate the object just to check if it's valid,
-            // but this is likely the best choice because:
-            // 1) This only happens occasionally, based on UI actions, and
-            // 2) There's no easy way to get at the cache of previews the UI uses,
-            //    and each blueprint requires a different GameObject, so we can't cache just one.
-            // TODO: Check if this is still the case with the new blueprint system.
-            GameObject gameObject = templateInstantiator.Instantiate(spec.Blueprint, roots.First().transform);
-            gameObject.SetActive(value: false);
-            var blockObject = gameObject.GetComponentSlow<BlockObject>();
-            blockObject.MarkAsPreviewAndInitialize();
-            blockObject.Reposition(placement);
-            bool isValid = blockObject.IsValid();
-            UnityEngine.Object.Destroy(gameObject);
-            return isValid;
+            var blockService = context.GetSingleton<IBlockService>();
+            var entityService = context.GetSingleton<EntityService>();
+
+            var toDelete = new HashSet<EntityComponent>();
+            var intersecting = new List<BlockObject>();
+
+            foreach (var block in spec.GetBlocks(placement))
+            {
+                if (!block.IsOccupied) continue;
+
+                intersecting.Clear();
+                blockService.GetIntersectingObjectsAt(block.Coordinates, block.Occupation, intersecting);
+                foreach (var obstacle in intersecting)
+                {
+                    if (obstacle == null) continue;
+                    var ec = obstacle.GetComponent<EntityComponent>();
+                    if (ec != null) toDelete.Add(ec);
+                }
+            }
+
+            if (toDelete.Count == 0) return;
+
+            Plugin.LogWarning($"[ReplayCleanup] Removing {toDelete.Count} conflicting obstacle(s) before placing {prefabName} at {placement.Coordinates}");
+            foreach (var entity in toDelete)
+            {
+                try { entityService.Delete(entity); }
+                catch (Exception e) { Plugin.LogWarning($"[ReplayCleanup] Failed to delete obstacle: {e.Message}"); }
+            }
         }
 
         public override string ToActionString()
