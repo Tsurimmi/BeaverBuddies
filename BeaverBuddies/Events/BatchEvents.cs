@@ -1,10 +1,12 @@
 ﻿using HarmonyLib;
 using System;
+using Timberborn.BlockSystem;
 using Timberborn.DistributionSystem;
 using Timberborn.GameDistricts;
 using Timberborn.GameDistrictsMigration;
 using Timberborn.GameDistrictsMigrationBatchControl;
 using Timberborn.Goods;
+using UnityEngine;
 
 namespace BeaverBuddies.Events
 {
@@ -61,13 +63,15 @@ namespace BeaverBuddies.Events
     {
         public string fromDistrictID;
         public string toDistrictID;
+        public Vector3Int? fromCoordinates;
+        public Vector3Int? toCoordinates;
         public int amount;
         public DistributorType distributorType;
 
         public override void Replay(IReplayContext context)
         {
-            var fromDistrictCenter = GetComponent<DistrictCenter>(context, fromDistrictID);
-            var toDistrictCenter = GetComponent<DistrictCenter>(context, toDistrictID);
+            var fromDistrictCenter = GetComponent<DistrictCenter>(context, fromDistrictID, fromCoordinates);
+            var toDistrictCenter = GetComponent<DistrictCenter>(context, toDistrictID, toCoordinates);
             if (fromDistrictCenter == null || toDistrictCenter == null) { return; }
 
             var distributor = DistributorUtils.GetDistributor(distributorType, fromDistrictCenter);
@@ -108,12 +112,22 @@ namespace BeaverBuddies.Events
                 {
                     return null;
                 }
-                var fromDistrictID = ReplayEvent.GetEntityID(__instance._populationDistributor.DistrictCenter);
-                var toDistrictID = ReplayEvent.GetEntityID(__instance._target);
+                var fromDistrict = __instance._populationDistributor.DistrictCenter;
+                var toDistrict = __instance._target;
+                var fromDistrictID = ReplayEvent.GetEntityID(fromDistrict);
+                var toDistrictID = ReplayEvent.GetEntityID(toDistrict);
+                Vector3Int? fromCoords = null;
+                Vector3Int? toCoords = null;
+                var fromBlock = fromDistrict?.GetComponent<BlockObject>();
+                if (fromBlock != null) fromCoords = fromBlock.Coordinates;
+                var toBlock = toDistrict?.GetComponent<BlockObject>();
+                if (toBlock != null) toCoords = toBlock.Coordinates;
                 return new ManualMigrationEvent()
                 {
                     fromDistrictID = fromDistrictID,
                     toDistrictID = toDistrictID,
+                    fromCoordinates = fromCoords,
+                    toCoordinates = toCoords,
                     amount = amount,
                     distributorType = type
                 };
@@ -129,7 +143,7 @@ namespace BeaverBuddies.Events
 
         public override void Replay(IReplayContext context)
         {
-            DistrictCenter districtCenter = GetComponent<DistrictCenter>(context, districtEntityID);
+            DistrictCenter districtCenter = GetComponent<DistrictCenter>(context, districtEntityID, entityCoordinates);
             if (districtCenter == null) return;
             PopulationDistributor distributor = DistributorUtils.GetDistributor(distributorType, districtCenter);
             if (distributor == null) return;
@@ -174,7 +188,7 @@ namespace BeaverBuddies.Events
 
         public override void Replay(IReplayContext context)
         {
-            DistrictCenter districtCenter = GetComponent<DistrictCenter>(context, districtEntityID);
+            DistrictCenter districtCenter = GetComponent<DistrictCenter>(context, districtEntityID, entityCoordinates);
             if (districtCenter == null) return;
             PopulationDistributor distributor = DistributorUtils.GetDistributor(distributorType, districtCenter);
             if (distributor == null) return;
@@ -273,7 +287,7 @@ namespace BeaverBuddies.Events
 
         public override void Replay(IReplayContext context)
         {
-            var distributionSetting = GetComponent<DistrictDistributionSetting>(context, districtEntityID);
+            var distributionSetting = GetComponent<DistrictDistributionSetting>(context, districtEntityID, entityCoordinates);
             if (distributionSetting == null) return;
             var goodSetting = distributionSetting.GetGoodDistributionSetting(goodID);
             if (goodSetting == null)
