@@ -68,7 +68,7 @@ namespace BeaverBuddies.Events
             if (entityID == null) return;
 
 
-            var selector = GetComponent<Selector>(context, entityID);
+            var selector = GetComponent<Selector>(context, entityID, entityCoordinates);
             if (selector == null) return;
             SetValue(context, selector, itemID);
         }
