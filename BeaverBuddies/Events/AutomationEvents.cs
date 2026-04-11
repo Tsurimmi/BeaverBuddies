@@ -8,7 +8,9 @@ using Timberborn.AutomationBuildings;
 using Timberborn.AutomationBuildingsUI;
 using Timberborn.AutomationUI;
 using Timberborn.BaseComponentSystem;
+using Timberborn.BlockSystem;
 using Timberborn.FireworkSystem;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace BeaverBuddies.Events
@@ -284,11 +286,12 @@ namespace BeaverBuddies.Events
     {
         public string automatableID;
         public string inputID;
+        public Vector3Int? inputCoordinates;
 
         public override void Replay(IReplayContext context)
         {
-            Automatable automatable = GetComponent<Automatable>(context, automatableID);
-            Automator automator = GetComponent<Automator>(context, inputID);
+            Automatable automatable = GetComponent<Automatable>(context, automatableID, entityCoordinates);
+            Automator automator = GetComponent<Automator>(context, inputID, inputCoordinates);
             if (automatable == null || automator == null) return;
             automatable.SetInput(automator);
         }
@@ -307,10 +310,17 @@ namespace BeaverBuddies.Events
             return ReplayEvent.DoEntityPrefix(__instance._automatable, entityID =>
             {
                 string automatorID = ReplayEvent.GetEntityID(automator);
+                Vector3Int? automatorCoords = null;
+                if (automator != null)
+                {
+                    var blockObj = automator.GetComponent<BlockObject>();
+                    if (blockObj != null) automatorCoords = blockObj.Coordinates;
+                }
                 return new SetAutomatableInputEvent
                 {
                     automatableID = entityID,
                     inputID = automatorID,
+                    inputCoordinates = automatorCoords,
                 };
             });
         }
