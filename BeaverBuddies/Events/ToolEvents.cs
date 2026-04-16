@@ -79,18 +79,33 @@ namespace BeaverBuddies.Events
         // Catches cases where cleanup couldn't fully free the slot (navmesh
         // obstacles registered by special buildings, etc.) and would otherwise
         // crash during the Unity Start() of the placed entity.
+        // Special buildings like DistrictCrossing trigger DistrictObstacle
+        // hooks during MarkAsPreviewAndInitialize that can throw if the
+        // navmesh node is already occupied, so we wrap the whole call in a
+        // try/catch and treat any throw as "not valid".
         private static bool IsPlacementValid(IReplayContext context, Placement placement, BuildingSpec spec)
         {
-            var templateInstantiator = context.GetSingleton<TemplateInstantiator>();
-            var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
-            GameObject gameObject = templateInstantiator.Instantiate(spec.Blueprint, roots.First().transform);
-            gameObject.SetActive(value: false);
-            var blockObject = gameObject.GetComponentSlow<BlockObject>();
-            blockObject.MarkAsPreviewAndInitialize();
-            blockObject.Reposition(placement);
-            bool isValid = blockObject.IsValid();
-            UnityEngine.Object.Destroy(gameObject);
-            return isValid;
+            GameObject gameObject = null;
+            try
+            {
+                var templateInstantiator = context.GetSingleton<TemplateInstantiator>();
+                var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+                gameObject = templateInstantiator.Instantiate(spec.Blueprint, roots.First().transform);
+                gameObject.SetActive(value: false);
+                var blockObject = gameObject.GetComponentSlow<BlockObject>();
+                blockObject.MarkAsPreviewAndInitialize();
+                blockObject.Reposition(placement);
+                return blockObject.IsValid();
+            }
+            catch (Exception e)
+            {
+                Plugin.LogWarning($"[ReplayReject] Validation preview threw for placement: {e.Message}");
+                return false;
+            }
+            finally
+            {
+                if (gameObject != null) UnityEngine.Object.Destroy(gameObject);
+            }
         }
 
         private void DuplicateSettingsIfNeeded(IReplayContext context, BaseComponent targetEntity)
