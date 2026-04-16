@@ -45,13 +45,23 @@ namespace BeaverBuddies.Events
             Placement placement = new Placement(coordinates, orientation,
                 isFlipped ? FlipMode.Flipped : FlipMode.Unflipped);
 
-            // Clean conflicting obstacles at each occupied block of the new placement.
-            // Handles state divergence where the receiver has stale objects (e.g. a
-            // TerrainBlock that wasn't dynamited, a building that wasn't deleted)
-            // blocking the placement. Only removes objects that actually conflict on
-            // the same occupation bits, so coexisting objects (Path over Platform)
-            // are preserved.
+            // Clear stale obstacles first to handle state divergence where the
+            // receiver has objects (e.g. a TerrainBlock not yet dynamited, an
+            // old building not yet deleted) blocking the placement. Only objects
+            // that conflict on the same occupation bits are removed, so
+            // coexisting objects (Path over Platform) are preserved.
             CleanConflictingObstacles(context, blockObjectSpec, placement);
+
+            // Then validate post-cleanup. If still invalid, skip rather than
+            // crash. Some buildings (e.g. DistrictCrossing) hook
+            // OnEnterUnfinishedState which throws asynchronously during Unity
+            // Start(), bypassing any try/catch around placer.Place(), so we
+            // MUST pre-validate to avoid a hard crash.
+            if (!IsPlacementValid(context, placement, buildingSpec))
+            {
+                Plugin.LogWarning($"[ReplayReject] Invalid placement for {prefabName} at {coordinates} (after cleanup) orientation={orientation} flipped={isFlipped}");
+                return;
+            }
 
             try
             {
@@ -63,6 +73,24 @@ namespace BeaverBuddies.Events
             {
                 Plugin.LogWarning($"[ReplayReject] Place failed for {prefabName} at {coordinates}: {e.Message}");
             }
+        }
+
+        // Pre-instantiates a preview to validate placement before committing.
+        // Catches cases where cleanup couldn't fully free the slot (navmesh
+        // obstacles registered by special buildings, etc.) and would otherwise
+        // crash during the Unity Start() of the placed entity.
+        private static bool IsPlacementValid(IReplayContext context, Placement placement, BuildingSpec spec)
+        {
+            var templateInstantiator = context.GetSingleton<TemplateInstantiator>();
+            var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+            GameObject gameObject = templateInstantiator.Instantiate(spec.Blueprint, roots.First().transform);
+            gameObject.SetActive(value: false);
+            var blockObject = gameObject.GetComponentSlow<BlockObject>();
+            blockObject.MarkAsPreviewAndInitialize();
+            blockObject.Reposition(placement);
+            bool isValid = blockObject.IsValid();
+            UnityEngine.Object.Destroy(gameObject);
+            return isValid;
         }
 
         private void DuplicateSettingsIfNeeded(IReplayContext context, BaseComponent targetEntity)
